@@ -1,6 +1,9 @@
 from operator import attrgetter
 
 from django import forms
+import io
+import json
+import zipfile
 from django.contrib import admin
 from django.core.exceptions import PermissionDenied
 from django.db import transaction
@@ -12,7 +15,9 @@ from django.utils.translation import gettext, gettext_lazy as _, ngettext
 from reversion.admin import VersionAdmin
 
 from judge.models import LanguageLimit, Problem, ProblemClarification, ProblemPointsVote, ProblemTranslation, Profile, \
-    Solution
+    Solution, ProblemGroup, ProblemType
+import uuid
+from judge.models.runtime import Language
 from judge.utils.views import NoBatchDeleteMixin
 from judge.widgets import AdminHeavySelect2MultipleWidget, AdminMartorWidget, AdminSelect2MultipleWidget, \
     AdminSelect2Widget, CheckboxSelectMultipleWithSelectAll
@@ -20,6 +25,11 @@ from judge.widgets import AdminHeavySelect2MultipleWidget, AdminMartorWidget, Ad
 
 class ProblemForm(ModelForm):
     change_message = forms.CharField(max_length=256, label=_('Edit reason'), required=False)
+    # Allow uploading a problem package (zip). If provided, we will try to read config.json
+    # and use it to fill identification fields. The presence of a package will also relax
+    # validation for a number of normally-required fields in the admin form.
+    problem_package = forms.FileField(label=_('Problem package'), required=False,
+                                      help_text=_('Upload a ZIP problem package (config.json at root).'))
 
     def __init__(self, *args, **kwargs):
         super(ProblemForm, self).__init__(*args, **kwargs)
@@ -30,6 +40,13 @@ class ProblemForm(ModelForm):
         self.fields['change_message'].widget.attrs.update({
             'placeholder': gettext('Describe the changes you made (optional)'),
         })
+        # Allow admin to submit without filling all required fields — server-side
+        # defaults will be applied in save_model(). This makes creating a problem
+        # quick and avoids client-side validation blocking when defaults are desired.
+        for fld in ('types', 'group', 'time_limit', 'memory_limit', 'allowed_languages', 'points',
+                    'code', 'name', 'description'):
+            if fld in self.fields:
+                self.fields[fld].required = False
 
     class Meta:
         widgets = {
@@ -42,6 +59,64 @@ class ProblemForm(ModelForm):
             'group': AdminSelect2Widget,
             'description': AdminMartorWidget(attrs={'data-markdownfy-url': reverse_lazy('problem_preview')}),
         }
+
+    def clean(self):
+        cleaned = super(ProblemForm, self).clean()
+        pkg = cleaned.get('problem_package') or self.files.get('problem_package')
+        if not pkg:
+            return cleaned
+
+        # If a package is uploaded, attempt to extract config.json and pre-fill
+        # identification fields (code/name/description). If config.json is not present
+        # we don't block saving here, but we will relax form validation for several
+        # fields so the admin can continue and the save handler will attempt sensible
+        # defaults.
+        try:
+            data = pkg.read()
+            z = zipfile.ZipFile(io.BytesIO(data))
+            # config.json at root expected by problem package spec
+            try:
+                with z.open('config.json') as cj:
+                    cfg = json.load(cj)
+            except KeyError:
+                # try .judge/config.json as a fallback
+                try:
+                    with z.open('.judge/config.json') as cj:
+                        cfg = json.load(cj)
+                except KeyError:
+                    cfg = {}
+        except Exception:
+            cfg = {}
+
+        # Map known fields from package config to form fields when present
+        pid = cfg.get('problem_id') or cfg.get('problemID')
+        pname = cfg.get('problem_name') or cfg.get('problemName') or cfg.get('problem')
+        pdesc = cfg.get('description')
+
+        if pid and 'code' in self.fields and not cleaned.get('code'):
+            # sanitize to allowed characters in Problem.code: keep lowercase alnum
+            s = ''.join(ch for ch in pid.lower() if ch.isalnum())
+            cleaned['code'] = s
+            self.data = self.data.copy()
+            self.data['code'] = s
+
+        if pname and 'name' in self.fields and not cleaned.get('name'):
+            cleaned['name'] = pname
+            self.data = self.data.copy()
+            self.data['name'] = pname
+
+        if pdesc and 'description' in self.fields and not cleaned.get('description'):
+            cleaned['description'] = pdesc
+            self.data = self.data.copy()
+            self.data['description'] = pdesc
+
+        # Relax a number of normally-required fields in the admin form so the
+        # admin user can rely on the package to provide runtime/test configuration.
+        for fld in ('types', 'group', 'time_limit', 'memory_limit', 'allowed_languages', 'points'):
+            if fld in self.fields:
+                self.fields[fld].required = False
+
+        return cleaned
 
 
 class ProblemCreatorListFilter(admin.SimpleListFilter):
@@ -122,7 +197,7 @@ class ProblemAdmin(NoBatchDeleteMixin, VersionAdmin):
     fieldsets = (
         (None, {
             'fields': (
-                'code', 'name', 'is_public', 'is_manually_managed', 'date', 'authors', 'curators', 'testers',
+                'code', 'name', 'problem_package', 'is_public', 'is_manually_managed', 'date', 'authors', 'curators', 'testers',
                 'organizations', 'submission_source_visibility_mode', 'is_full_markup',
                 'description', 'license',
             ),
@@ -240,6 +315,65 @@ class ProblemAdmin(NoBatchDeleteMixin, VersionAdmin):
         if form.changed_data and 'organizations' in form.changed_data:
             obj.is_organization_private = bool(form.cleaned_data['organizations'])
 
+        # Parse uploaded problem package (if any) for identification fields.
+        cfg = {}
+        try:
+            pkg_file = form.files.get('problem_package')
+        except Exception:
+            pkg_file = None
+
+        if pkg_file:
+            try:
+                data = pkg_file.read()
+                z = zipfile.ZipFile(io.BytesIO(data))
+                try:
+                    with z.open('config.json') as cj:
+                        cfg = json.load(cj)
+                except KeyError:
+                    try:
+                        with z.open('.judge/config.json') as cj:
+                            cfg = json.load(cj)
+                    except KeyError:
+                        cfg = {}
+            except Exception:
+                cfg = {}
+
+        pid = cfg.get('problem_id') or cfg.get('problemID') if cfg else None
+        pname = cfg.get('problem_name') or cfg.get('problemName') or cfg.get('problem') if cfg else None
+        pdesc = cfg.get('description') if cfg else None
+
+        if pid and not getattr(obj, 'code', None):
+            obj.code = ''.join(ch for ch in pid.lower() if ch.isalnum())
+        if pname and not getattr(obj, 'name', None):
+            obj.name = pname
+        if pdesc and not getattr(obj, 'description', None):
+            obj.description = pdesc
+
+        # Apply server-side defaults unconditionally so DB constraints are satisfied.
+        if not getattr(obj, 'code', None):
+            ts = timezone.now().strftime('p%Y%m%d%H%M%S')
+            obj.code = (ts + uuid.uuid4().hex[:4]).lower()
+        if not getattr(obj, 'name', None):
+            obj.name = _('Untitled problem')
+        if not getattr(obj, 'description', None):
+            obj.description = gettext('No description provided.')
+        if not getattr(obj, 'time_limit', None):
+            obj.time_limit = 30
+        if not getattr(obj, 'memory_limit', None):
+            obj.memory_limit = 65536
+        if not getattr(obj, 'points', None):
+            obj.points = 100
+        if not getattr(obj, 'group', None):
+            try:
+                grp = ProblemGroup.objects.filter(name='default').first()
+                if not grp:
+                    grp = ProblemGroup.objects.first()
+                if not grp:
+                    grp = ProblemGroup.objects.create(name='default', full_name='Default')
+                obj.group = grp
+            except Exception:
+                pass
+
         if form.cleaned_data.get('is_public') and not request.user.has_perm('judge.change_public_visibility'):
             if not obj.is_organization_private:
                 raise PermissionDenied
@@ -252,6 +386,22 @@ class ProblemAdmin(NoBatchDeleteMixin, VersionAdmin):
             any(f in form.changed_data for f in ('is_public', 'organizations', 'points', 'partial'))
         ):
             self._rescore(request, obj.id)
+
+        # After save, ensure M2M required fields have defaults if still empty.
+        try:
+            if not obj.allowed_languages.exists():
+                py = Language.get_python3()
+                obj.allowed_languages.add(py)
+        except Exception:
+            pass
+
+        try:
+            if not obj.types.exists():
+                # Ensure a default ProblemType exists and attach it.
+                ptype, _ = ProblemType.objects.get_or_create(name='default', defaults={'full_name': 'Default'})
+                obj.types.add(ptype)
+        except Exception:
+            pass
 
     def construct_change_message(self, request, form, *args, **kwargs):
         if form.cleaned_data.get('change_message'):
