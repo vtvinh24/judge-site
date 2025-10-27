@@ -1,0 +1,27 @@
+FROM postgres:14-alpine
+
+# Set timezone
+ENV TZ=UTC
+
+# PostgreSQL environment
+ENV POSTGRES_DB=hackathon_db
+ENV POSTGRES_USER=judge
+ENV POSTGRES_PASSWORD=judgepass
+ENV PGDATA=/var/lib/postgresql/data/pgdata
+
+# Install additional tools for build stage
+RUN apk add --no-cache curl
+
+# Create workspace structure
+RUN mkdir -p /workspace /workspace/problem /workspace/shared /workspace/tmp /workspace/artifacts
+
+# Copy build-time data
+COPY data/ /workspace/problem/data/
+
+# Set ownership
+RUN chown -R postgres:postgres /workspace
+
+WORKDIR /workspace
+
+# Start PostgreSQL and initialize
+CMD ["postgres"]

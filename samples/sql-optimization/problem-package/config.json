@@ -1,0 +1,130 @@
+{
+  "problem_id": "db-optimization",
+  "problem_name": "Database Query Optimization Challenge",
+  "version": "1.0.0",
+  "description": "Optimize slow SQL queries on a 1M+ row dataset using schema changes, indexes, and query rewriting",
+  "project_type": "database_design",
+  "submission_packages": [
+    {
+      "package_id": "optimization_solution",
+      "package_name": "Query Optimization Solution",
+      "description": "Teams submit their optimized SQL queries, migration scripts, and schema modifications"
+    }
+  ],
+  "containers": [
+    {
+      "container_id": "database",
+      "build_stage": {
+        "dockerfile": "containers/database/Dockerfile.build",
+        "context": "containers/database",
+        "network_mode": "bridge",
+        "resource_limits": {
+          "memory": "1g",
+          "cpus": 2.0,
+          "timeout": 300
+        }
+      },
+      "eval_stage": {
+        "dockerfile": "containers/database/Dockerfile.eval",
+        "context": "containers/database",
+        "network_mode": "isolated",
+        "resource_limits": {
+          "memory": "1g",
+          "cpus": 2.0,
+          "timeout": 600
+        }
+      },
+      "accepts_submission": false,
+      "port": 5432,
+      "health_check": {
+        "command": ["CMD-SHELL", "pg_isready -U judge -d hackathon_db"],
+        "interval": 5,
+        "timeout": 3,
+        "retries": 5,
+        "start_period": 10
+      }
+    },
+    {
+      "container_id": "evaluator",
+      "build_stage": {
+        "dockerfile": "containers/evaluator/Dockerfile.build",
+        "context": "containers/evaluator",
+        "network_mode": "bridge",
+        "resource_limits": {
+          "memory": "512m",
+          "cpus": 1.0,
+          "timeout": 300
+        }
+      },
+      "eval_stage": {
+        "dockerfile": "containers/evaluator/Dockerfile.eval",
+        "context": "containers/evaluator",
+        "network_mode": "isolated",
+        "resource_limits": {
+          "memory": "512m",
+          "cpus": 1.0,
+          "timeout": 1800
+        }
+      },
+      "accepts_submission": true,
+      "submission_package_id": "optimization_solution",
+      "depends_on": ["database"],
+      "health_check": {
+        "command": ["CMD-SHELL", "test -f /workspace/ready"],
+        "interval": 5,
+        "timeout": 3,
+        "retries": 3,
+        "start_period": 5
+      }
+    }
+  ],
+  "rubrics": [
+    {
+      "rubric_id": "correctness",
+      "container_id": "evaluator",
+      "rubric_name": "Query Result Correctness",
+      "rubric_type": "test_cases",
+      "description": "Validates that optimized queries return correct results matching baseline queries",
+      "max_score": 50,
+      "output_file": "rubric_correctness.json",
+      "timeout": 300
+    },
+    {
+      "rubric_id": "performance",
+      "container_id": "evaluator",
+      "rubric_name": "Query Performance",
+      "rubric_type": "performance_benchmark",
+      "description": "Measures query execution time improvements over baseline",
+      "max_score": 30,
+      "output_file": "rubric_performance.json",
+      "timeout": 600
+    },
+    {
+      "rubric_id": "concurrency",
+      "container_id": "evaluator",
+      "rubric_name": "Concurrent Load Performance",
+      "rubric_type": "performance_benchmark",
+      "description": "Tests query performance under concurrent load",
+      "max_score": 10,
+      "output_file": "rubric_concurrency.json",
+      "timeout": 300
+    },
+    {
+      "rubric_id": "efficiency",
+      "container_id": "database",
+      "rubric_name": "Storage Efficiency",
+      "rubric_type": "database_integrity",
+      "description": "Evaluates storage space optimization and index efficiency",
+      "max_score": 10,
+      "output_file": "rubric_efficiency.json",
+      "timeout": 120
+    }
+  ],
+  "hooks_config": {
+    "timeout_seconds": 30,
+    "parallel_execution": false,
+    "retries": 2,
+    "retry_delay_seconds": 10,
+    "continue_on_error": false
+  }
+}

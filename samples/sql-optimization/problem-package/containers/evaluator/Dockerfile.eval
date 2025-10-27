@@ -1,0 +1,23 @@
+FROM node:18-alpine
+
+# Install PostgreSQL client and other tools
+RUN apk add --no-cache postgresql-client curl bash jq
+
+# Create workspace structure
+RUN mkdir -p /workspace /workspace/problem /workspace/submission /workspace/shared \
+             /workspace/tmp /workspace/artifacts /workspace/hooks /workspace/data
+
+WORKDIR /workspace
+
+# Create a basic node environment for testing
+RUN npm init -y && npm install pg
+
+# Copy and setup hooks with proper permissions
+COPY hooks/ /workspace/hooks/
+RUN find /workspace/hooks -name "*.sh" -type f -exec chmod +x {} \;
+
+# Copy entrypoint
+COPY entrypoint.eval.sh /workspace/entrypoint.eval.sh
+RUN chmod +x /workspace/entrypoint.eval.sh
+
+CMD ["/workspace/entrypoint.eval.sh"]

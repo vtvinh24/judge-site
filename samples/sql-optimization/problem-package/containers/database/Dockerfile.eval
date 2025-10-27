@@ -1,0 +1,33 @@
+FROM postgres:14-alpine
+
+# Set timezone
+ENV TZ=UTC
+
+# PostgreSQL environment
+ENV POSTGRES_DB=hackathon_db
+ENV POSTGRES_USER=judge
+ENV POSTGRES_PASSWORD=judgepass
+ENV PGDATA=/var/lib/postgresql/data/pgdata
+
+# Install additional tools
+RUN apk add --no-cache curl
+
+# Create workspace structure
+RUN mkdir -p /workspace /workspace/problem /workspace/submission /workspace/shared \
+             /workspace/tmp /workspace/artifacts /workspace/hooks /workspace/data
+
+# Copy and setup hooks with proper permissions
+COPY hooks/ /workspace/hooks/
+RUN find /workspace/hooks -name "*.sh" -type f -exec chmod +x {} \;
+
+# Set ownership
+RUN chown -R postgres:postgres /workspace
+
+WORKDIR /workspace
+
+# Copy entrypoint
+COPY entrypoint.eval.sh /workspace/entrypoint.eval.sh
+RUN chmod +x /workspace/entrypoint.eval.sh
+
+# Start PostgreSQL
+CMD ["/workspace/entrypoint.eval.sh"]

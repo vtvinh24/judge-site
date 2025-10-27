@@ -1,0 +1,18 @@
+FROM node:18-alpine
+
+# Install PostgreSQL client and other tools
+RUN apk add --no-cache postgresql-client curl bash
+
+# Create workspace structure
+RUN mkdir -p /workspace /workspace/problem /workspace/submission /workspace/shared \
+             /workspace/tmp /workspace/artifacts /workspace/hooks /workspace/data
+
+WORKDIR /workspace
+
+# Create a basic node environment for testing
+RUN npm init -y && npm install pg
+
+# Copy evaluator scripts
+COPY hooks/ /workspace/problem/hooks/
+
+CMD ["sleep", "infinity"]
