@@ -1,5 +1,6 @@
 import hashlib
 import hmac
+import os
 
 from django.conf import settings
 from django.core.exceptions import ObjectDoesNotExist
@@ -15,6 +16,14 @@ from judge.models.problem import Problem, SubmissionSourceAccess
 from judge.models.profile import Profile
 from judge.models.runtime import Language
 from judge.utils.unicode import utf8bytes
+
+
+def _submission_directory_file(user_id, filename):
+    return os.path.join('submissions', str(user_id), os.path.basename(filename))
+
+
+def submission_directory_file(instance, filename):
+    return _submission_directory_file(instance.user_id or 'unknown', filename)
 
 __all__ = ['SUBMISSION_RESULT', 'Submission', 'SubmissionSource', 'SubmissionTestCase']
 
@@ -66,6 +75,15 @@ class Submission(models.Model):
 
     user = models.ForeignKey(Profile, verbose_name=_('user'), on_delete=models.CASCADE, db_index=False)
     problem = models.ForeignKey(Problem, verbose_name=_('problem'), on_delete=models.CASCADE, db_index=False)
+    # Submission package fields (for package-based submission flow)
+    package_file = models.FileField(verbose_name=_('submission package file'), null=True, blank=True,
+                                    upload_to=submission_directory_file)
+    package_id = models.CharField(max_length=64, verbose_name=_('package id'), null=True, blank=True,
+                                  help_text=_('External JUDGE package identifier'))
+    package_version = models.CharField(max_length=32, verbose_name=_('package version'), null=True, blank=True)
+    package_checksum = models.CharField(max_length=128, verbose_name=_('package checksum'), null=True, blank=True)
+    package_size = models.BigIntegerField(verbose_name=_('package size (bytes)'), null=True, blank=True)
+    package_uploaded_at = models.DateTimeField(verbose_name=_('package uploaded at'), null=True, blank=True)
     date = models.DateTimeField(verbose_name=_('submission time'), auto_now_add=True, db_index=True)
     time = models.FloatField(verbose_name=_('execution time'), null=True)
     memory = models.FloatField(verbose_name=_('memory usage'), null=True)
