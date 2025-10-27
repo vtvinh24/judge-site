@@ -1,0 +1,112 @@
+services:
+  db:
+    image: mariadb:latest
+    container_name: dmoj-db
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: dmoj
+      MYSQL_USER: dmoj
+      MYSQL_PASSWORD: dmoj
+    volumes:
+      - mariadb_data:/var/lib/mysql
+      - ./init-db.sql:/docker-entrypoint-initdb.d/init-db.sql
+    ports:
+      - "3306:3306"
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:alpine
+    container_name: dmoj-redis
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  web:
+    build: .
+    container_name: dmoj-web
+    command: >
+      sh -c "
+        python manage.py migrate &&
+        python manage.py loaddata navbar language_small demo &&
+        python manage.py compilemessages &&
+        python manage.py compilejsi18n &&
+        python manage.py collectstatic --noinput &&
+        ./make_style.sh &&
+        python manage.py runserver 0.0.0.0:8000
+      "
+    volumes:
+      - .:/app
+      - static_volume:/app/static
+      - media_volume:/app/media
+    ports:
+      - "8000:8000"
+    environment:
+      - DEBUG=True
+      - DATABASE_ENGINE=django.db.backends.mysql
+      - DATABASE_NAME=dmoj
+      - DATABASE_USER=dmoj
+      - DATABASE_PASSWORD=dmoj
+      - DATABASE_HOST=db
+      - DATABASE_PORT=3306
+      - REDIS_URL=redis://redis:6379/0
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  celery:
+    build: .
+    container_name: dmoj-celery
+    command: celery -A dmoj_celery worker --loglevel=info
+    volumes:
+      - .:/app
+    environment:
+      - DATABASE_ENGINE=django.db.backends.mysql
+      - DATABASE_NAME=dmoj
+      - DATABASE_USER=dmoj
+      - DATABASE_PASSWORD=dmoj
+      - DATABASE_HOST=db
+      - DATABASE_PORT=3306
+      - REDIS_URL=redis://redis:6379/0
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  bridged:
+    build: .
+    container_name: dmoj-bridged
+    command: python manage.py runbridged
+    volumes:
+      - .:/app
+    ports:
+      - "9998:9998"
+      - "9999:9999"
+    environment:
+      - DATABASE_ENGINE=django.db.backends.mysql
+      - DATABASE_NAME=dmoj
+      - DATABASE_USER=dmoj
+      - DATABASE_PASSWORD=dmoj
+      - DATABASE_HOST=db
+      - DATABASE_PORT=3306
+      - REDIS_URL=redis://redis:6379/0
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+volumes:
+  mariadb_data:
+  static_volume:
+  media_volume:
