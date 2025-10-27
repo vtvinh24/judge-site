@@ -1,6 +1,8 @@
 import logging
 import os
 import re
+import hashlib
+import uuid
 from datetime import timedelta
 from operator import itemgetter
 from random import randrange
@@ -751,6 +753,85 @@ class ProblemSubmit(LoginRequiredMixin, ProblemMixin, TitleMixin, SingleObjectFo
         return context
 
     def post(self, request, *args, **kwargs):
+        # Support package upload via the problem detail "Submit" button
+        # If a package file is present in the POST, handle it as a submission package
+        # Ensure the target object is loaded (SingleObjectFormView normally sets this in its post/get)
+        self.object = self.get_object()
+        if request.FILES and request.FILES.get('package'):
+            package = request.FILES.get('package')
+
+            # Basic permission and rate-limit checks mirrored from form_valid
+            if (
+                not request.user.has_perm('judge.spam_submission') and
+                Submission.objects.filter(user=request.profile, rejudged_date__isnull=True)
+                                  .exclude(status__in=['D', 'IE', 'CE', 'AB']).count() >= settings.DMOJ_SUBMISSION_LIMIT
+            ):
+                return HttpResponse(format_html('<h1>{0}</h1>', _('You submitted too many submissions.')), status=429)
+
+            if not self.object.allowed_languages.exists():
+                # Fallback to user's default language if problem has no explicit languages
+                language = self.default_language
+            else:
+                language = self.default_language
+
+            if not request.user.is_superuser and self.object.banned_users.filter(id=request.profile.id).exists():
+                return generic_message(request, _('Banned from submitting'),
+                                       _('You have been declared persona non grata for this problem. '
+                                         'You are permanently barred from submitting to this problem.'))
+
+            if self.remaining_submission_count == 0:
+                return generic_message(request, _('Too many submissions'),
+                                       _('You have exceeded the submission limit for this problem.'))
+
+            # Create submission and attach package
+            try:
+                with transaction.atomic():
+                    self.new_submission = Submission(user=request.profile, problem=self.object, language=language)
+                    # Do not save yet; save after writing file and metadata
+                    self.new_submission.save()
+
+                    # Save package file onto submission.package_file
+                    # Django UploadedFile supports chunks(); we need to compute checksum/size as we store
+                    # Save the file using the FileField save() helper
+                    self.new_submission.package_file.save(package.name, package, save=False)
+
+                    # Compute checksum and size
+                    h = hashlib.sha256()
+                    size = 0
+                    try:
+                        for chunk in package.chunks():
+                            size += len(chunk)
+                            h.update(chunk)
+                    except Exception:
+                        # Fallback if chunks() fails
+                        package.seek(0)
+                        data = package.read()
+                        size = len(data)
+                        h.update(data)
+
+                    self.new_submission.package_checksum = h.hexdigest()
+                    self.new_submission.package_size = size
+                    self.new_submission.package_uploaded_at = timezone.now()
+                    self.new_submission.package_id = uuid.uuid4().hex
+                    self.new_submission.save()
+
+                    # Create an empty/placeholder SubmissionSource so judge-related plumbing doesn't break
+                    source = SubmissionSource(submission=self.new_submission, source='')
+                    source.save()
+
+                    # Trigger judging where appropriate; external judge integration may later use package_* fields
+                    self.new_submission.judge(force_judge=True, judge_id=None)
+
+                return HttpResponseRedirect(self.get_success_url())
+            except Http404:
+                user_logger.info(
+                    'Naughty user %s wants to submit to %s without permission',
+                    request.user.username,
+                    kwargs.get(self.slug_url_kwarg),
+                )
+                return HttpResponseForbidden(format_html('<h1>{0}</h1>', _('Do you want me to ban you?')))
+
+        # Default behaviour: delegate to form-based submission handling
         try:
             return super().post(request, *args, **kwargs)
         except Http404:
