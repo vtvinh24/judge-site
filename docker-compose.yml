@@ -29,6 +29,21 @@ services:
       timeout: 5s
       retries: 5
 
+  rabbitmq:
+    image: rabbitmq:3-management
+    container_name: dmoj-rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "status"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   web:
     build: .
     container_name: dmoj-web
@@ -57,10 +72,13 @@ services:
       - DATABASE_HOST=db
       - DATABASE_PORT=3306
       - REDIS_URL=redis://redis:6379/0
+      - EVENT_DAEMON_AMQP=amqp://guest:guest@rabbitmq:5672/
     depends_on:
       db:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      rabbitmq:
         condition: service_healthy
 
   celery:
@@ -77,10 +95,13 @@ services:
       - DATABASE_HOST=db
       - DATABASE_PORT=3306
       - REDIS_URL=redis://redis:6379/0
+      - EVENT_DAEMON_AMQP=amqp://guest:guest@rabbitmq:5672/
     depends_on:
       db:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      rabbitmq:
         condition: service_healthy
 
   bridged:
@@ -100,10 +121,13 @@ services:
       - DATABASE_HOST=db
       - DATABASE_PORT=3306
       - REDIS_URL=redis://redis:6379/0
+      - EVENT_DAEMON_AMQP=amqp://guest:guest@rabbitmq:5672/
     depends_on:
       db:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      rabbitmq:
         condition: service_healthy
 
 volumes:
