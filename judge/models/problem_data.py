@@ -3,6 +3,7 @@ import os
 
 from django.db import models
 from django.utils.translation import gettext_lazy as _
+from django.utils import timezone
 
 from judge.utils.problem_data import ProblemDataStorage
 
@@ -36,6 +37,14 @@ class ProblemData(models.Model):
                                    on_delete=models.CASCADE)
     zipfile = models.FileField(verbose_name=_('data zip file'), storage=problem_data_storage, null=True, blank=True,
                                upload_to=problem_directory_file)
+    # New package metadata fields to support external JUDGE package flow (backwards-compatible)
+    package_id = models.CharField(max_length=64, verbose_name=_('package id'), null=True, blank=True,
+                                  help_text=_('External JUDGE package identifier'))
+    package_version = models.CharField(max_length=32, verbose_name=_('package version'), null=True, blank=True)
+    package_checksum = models.CharField(max_length=128, verbose_name=_('package checksum'), null=True, blank=True,
+                                        help_text=_('Optional checksum (e.g. sha256) for the package'))
+    package_size = models.BigIntegerField(verbose_name=_('package size (bytes)'), null=True, blank=True)
+    package_uploaded_at = models.DateTimeField(verbose_name=_('package uploaded at'), null=True, blank=True)
     generator = models.FileField(verbose_name=_('generator file'), storage=problem_data_storage, null=True, blank=True,
                                  upload_to=problem_directory_file)
     output_prefix = models.IntegerField(verbose_name=_('output prefix length'), blank=True, null=True)
@@ -54,9 +63,32 @@ class ProblemData(models.Model):
         self.__original_zipfile = self.zipfile
 
     def save(self, *args, **kwargs):
+        # If the zipfile has changed, remove the original and update metadata.
         if self.zipfile != self.__original_zipfile:
-            self.__original_zipfile.delete(save=False)
-        return super(ProblemData, self).save(*args, **kwargs)
+            try:
+                if self.__original_zipfile:
+                    self.__original_zipfile.delete(save=False)
+            except Exception:
+                # Deleting the original file should not prevent saving the model.
+                pass
+
+            # Update package metadata where possible. Keep operations defensive to avoid
+            # breaking saves when storage backends don't expose size or other attrs.
+            if self.zipfile:
+                try:
+                    # FileField provides .size when file is available via storage
+                    self.package_size = getattr(self.zipfile, 'size', None)
+                except Exception:
+                    self.package_size = None
+                try:
+                    self.package_uploaded_at = timezone.now()
+                except Exception:
+                    self.package_uploaded_at = None
+
+        saved = super(ProblemData, self).save(*args, **kwargs)
+        # Update the original pointer so subsequent saves behave correctly.
+        self.__original_zipfile = self.zipfile
+        return saved
 
     def has_yml(self):
         return problem_data_storage.exists('%s/init.yml' % self.problem.code)
