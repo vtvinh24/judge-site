@@ -24,6 +24,10 @@ from judge.utils.problem_data import ProblemDataCompiler
 from judge.utils.unicode import utf8text
 from judge.utils.views import TitleMixin, add_file_response
 from judge.views.problem import ProblemMixin
+from judge.models import Problem, ProblemData, problem_data_storage
+import os
+from django.shortcuts import get_object_or_404
+from django.http import HttpResponse, Http404
 
 mimetypes.init()
 mimetypes.add_type('application/x-yaml', '.yml')
@@ -270,3 +274,42 @@ def problem_init_view(request, problem):
             format_html('<a href="{1}">{0}</a>', problem.name,
                         reverse('problem_detail', args=[problem.code])))),
     })
+
+
+def problem_package_download(request, problem):
+    """Public endpoint to download the problem package archive.
+
+    TODO: Add authentication/authorization (currently intentionally unauthenticated for testing).
+    """
+    # Resolve problem object
+    obj = get_object_or_404(Problem, code=problem)
+
+    # Ensure ProblemData exists and has a zipfile
+    try:
+        pdata = ProblemData.objects.get(problem=obj)
+    except ProblemData.DoesNotExist:
+        raise Http404()
+
+    if not pdata.zipfile:
+        raise Http404()
+
+    # Ensure the zipfile is inside the problem directory to avoid path traversal
+    problem_dir = problem_data_storage.path(obj.code)
+    # Use basename to be defensive
+    file_rel = os.path.join(obj.code, os.path.basename(pdata.zipfile.name))
+    file_abs = problem_data_storage.path(file_rel)
+    if os.path.commonpath((file_abs, problem_dir)) != problem_dir:
+        raise Http404()
+
+    response = HttpResponse()
+    try:
+        # Use add_file_response to support X-Accel-Redirect where configured
+        add_file_response(request, response, None, file_rel, problem_data_storage)
+    except IOError:
+        raise Http404()
+
+    # Force download
+    response['Content-Type'] = 'application/octet-stream'
+    filename = os.path.basename(pdata.zipfile.name)
+    response['Content-Disposition'] = 'attachment; filename="%s"' % filename
+    return response
