@@ -1,27 +1,16 @@
-from django.conf import settings
-import logging
+"""Backward-compatibility shim.
 
-__all__ = ['last', 'post']
+This module used to select the event poster backend. Event functionality has
+been centralized under ``judge.events.poster``. Importing this module will
+re-export that API but emit a deprecation notice.
+"""
+import warnings
+from judge.events import poster as _poster
 
-# Logger for event poster selection and lifecycle
-logger = logging.getLogger('judge.event_poster')
+warnings.warn('judge.event_poster is deprecated; import judge.events.poster instead', DeprecationWarning)
 
-if not settings.EVENT_DAEMON_USE:
-    real = False
-    logger.info('Event daemon disabled via settings.EVENT_DAEMON_USE')
+post = _poster.post
+last = _poster.last
+real = _poster.real
 
-    def post(channel, message):
-        logger.debug('post() called while event daemon disabled; dropping event channel=%s', channel)
-        return 0
-
-    def last():
-        return 0
-
-elif hasattr(settings, 'EVENT_DAEMON_AMQP'):
-    from .event_poster_amqp import last, post
-    real = True
-    logger.info('Event poster: using AMQP backend (exchange=%s)', getattr(settings, 'EVENT_DAEMON_AMQP_EXCHANGE', None))
-else:
-    from .event_poster_ws import last, post
-    real = True
-    logger.info('Event poster: using WebSocket backend')
+__all__ = ['post', 'last', 'real']
