@@ -7,6 +7,7 @@
   "type": "object",
   "additionalProperties": false,
   "properties": {
+    "problem_id": { "type": ["string", "null"] },
     "build_job_id": { "type": "string" },
     "status": { "type": "string", "enum": ["completed", "failed"] },
     "image_refs": { "type": "object", "additionalProperties": { "type": "string" }, "description": "Map container_id -> image tag/ref" },
