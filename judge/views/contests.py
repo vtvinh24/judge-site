@@ -29,7 +29,7 @@ from django.views.generic.list import BaseListView
 from icalendar import Calendar as ICalendar, Event
 from reversion import revisions
 
-from judge import event_poster as event
+from judge.events import poster as event
 from judge.comments import CommentedDetailView
 from judge.forms import ContestCloneForm
 from judge.models import Contest, ContestMoss, ContestParticipation, ContestProblem, ContestTag, \

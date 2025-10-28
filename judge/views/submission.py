@@ -19,7 +19,7 @@ from django.utils.translation import gettext as _, gettext_lazy
 from django.views.decorators.http import require_POST
 from django.views.generic import DetailView, ListView
 
-from judge import event_poster as event
+from judge.events import poster as event
 from judge.highlight_code import highlight_code
 from judge.models import Contest, Language, Problem, ProblemTranslation, Profile, Submission
 from judge.models.problem import SubmissionSourceAccess

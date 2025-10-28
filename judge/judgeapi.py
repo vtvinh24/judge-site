@@ -7,7 +7,7 @@ import zlib
 from django.conf import settings
 from django.utils import timezone
 
-from judge import event_poster as event
+from judge.events import poster as event
 from judge.judge_priority import BATCH_REJUDGE_PRIORITY, CONTEST_SUBMISSION_PRIORITY, DEFAULT_PRIORITY, REJUDGE_PRIORITY
 
 logger = logging.getLogger('judge.judgeapi')

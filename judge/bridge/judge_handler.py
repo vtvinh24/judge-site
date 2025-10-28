@@ -10,7 +10,7 @@ from django import db
 from django.conf import settings
 from django.utils import timezone
 
-from judge import event_poster as event
+from judge.events import poster as event
 from judge.bridge.base_handler import ZlibPacketHandler, proxy_list
 from judge.caching import finished_submission
 from judge.models import Judge, Language, LanguageLimit, Problem, RuntimeVersion, Submission, SubmissionTestCase

@@ -16,7 +16,7 @@ from django.views import View
 from django.views.generic import ListView
 from django.views.generic.detail import SingleObjectMixin
 
-from judge import event_poster as event
+from judge.events import poster as event
 from judge.models import Problem, Profile, Ticket, TicketMessage
 from judge.utils.diggpaginator import DiggPaginator
 from judge.utils.tickets import filter_visible_tickets, own_ticket_filter
