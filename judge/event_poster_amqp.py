@@ -3,6 +3,7 @@ import threading
 from time import time
 
 import pika
+from pika import BasicProperties
 import logging
 from django.conf import settings
 from pika.exceptions import AMQPError
@@ -31,9 +32,37 @@ class EventPoster(object):
         try:
             id = int(time() * 1000000)
             payload = json.dumps({'id': id, 'channel': channel, 'message': message})
-            # Note: routing_key is currently empty string; exchange bindings determine delivery.
-            self._chan.basic_publish(self._exchange, '', payload)
-            logger.debug('Published event id=%s channel=%s exchange=%s size=%d', id, channel, self._exchange, len(payload))
+            # Prepare AMQP properties: keep messages persistent and typed
+            try:
+                ts = int(time())
+            except Exception:
+                ts = None
+            props = BasicProperties(
+                content_type='application/json',
+                delivery_mode=2,
+                message_id=str(id),
+                timestamp=ts,
+                type=channel,
+                app_id=getattr(settings, 'EVENT_PUBLISHER_APPID', 'judge')
+            )
+            # Summarize message for logging (avoid huge dumps)
+            try:
+                if isinstance(message, dict):
+                    # show keys and up to 3 items for quick context
+                    keys = list(message.keys())[:3]
+                    summary = {k: message.get(k) for k in keys}
+                else:
+                    summary = str(message)[:200]
+            except Exception:
+                summary = '<unserializable>'
+
+            # Publish using channel as routing key so consumers can bind selectively.
+            # Exchange type should be 'topic' for wildcard subscriptions.
+            self._chan.basic_publish(self._exchange, channel, payload, properties=props)
+            # Log a concise human-readable line plus a debug payload for deeper inspection
+            logger.info('Published event id=%s channel=%s exchange=%s size=%d summary=%s',
+                        id, channel, self._exchange, len(payload), summary)
+            logger.debug('Published event payload=%s', payload)
             return id
         except AMQPError:
             logger.warning('AMQP publish error on try %d for channel %s; attempting reconnect', tries, channel)
