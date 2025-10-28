@@ -48,6 +48,37 @@ class ProblemForm(ModelForm):
             if fld in self.fields:
                 self.fields[fld].required = False
 
+        # If the problem already has an attached package, show its name and
+        # a download link in the help text for the upload field.
+        try:
+            if getattr(self, 'instance', None) and getattr(self.instance, 'pk', None):
+                from judge.models import ProblemData
+                pdata = ProblemData.objects.filter(problem=self.instance).first()
+                if pdata:
+                    pkg_name = None
+                    pkg_url = None
+                    if getattr(pdata, 'package_path', None):
+                        pkg_name = pdata.package_path.split('/')[-1]
+                    elif getattr(pdata, 'zipfile', None):
+                        try:
+                            pkg_name = pdata.zipfile.name.split('/')[-1]
+                        except Exception:
+                            pkg_name = None
+                    try:
+                        pkg_url = reverse('problem_package_download', args=[self.instance.code])
+                    except Exception:
+                        pkg_url = None
+
+                    if pkg_name:
+                        if pkg_url:
+                            extra = format_html(' Currently: <a href="{0}">{1}</a>', pkg_url, pkg_name)
+                        else:
+                            extra = format_html(' Currently: {0}', pkg_name)
+                        self.fields['problem_package'].help_text = (self.fields['problem_package'].help_text + extra)
+        except Exception:
+            # Do not let help-text rendering failures break the admin form.
+            pass
+
     class Meta:
         widgets = {
             'authors': AdminHeavySelect2MultipleWidget(data_view='profile_select2'),
@@ -381,6 +412,33 @@ class ProblemAdmin(NoBatchDeleteMixin, VersionAdmin):
                 raise PermissionDenied
 
         super(ProblemAdmin, self).save_model(request, obj, form, change)
+        # If an admin uploaded a problem package file, persist it to ProblemData.
+        # This ensures packages uploaded during problem creation/edit are saved.
+        if pkg_file:
+            try:
+                from judge.models import ProblemData
+                pdata, _ = ProblemData.objects.get_or_create(problem=obj)
+                # Use the FileField save helper to store the uploaded file.
+                pdata.zipfile.save(pkg_file.name, pkg_file, save=False)
+                try:
+                    pdata.package_size = getattr(pkg_file, 'size', None)
+                except Exception:
+                    pdata.package_size = None
+                try:
+                    pdata.package_uploaded_at = timezone.now()
+                except Exception:
+                    pdata.package_uploaded_at = None
+                # Also store a package_path reference (storage-relative) so
+                # consumers can prefer this path over the FileField. Use the
+                # FileField's name which is typically '<code>/<basename>'.
+                try:
+                    pdata.package_path = pdata.zipfile.name
+                except Exception:
+                    pass
+                pdata.save()
+            except Exception:
+                # Don't let package save failures block the main save operation.
+                pass
         if (
             form.changed_data and
             any(f in form.changed_data for f in ('is_public', 'organizations', 'points', 'partial'))

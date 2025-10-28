@@ -215,6 +215,37 @@ class ProblemDetail(ProblemMixin, SolvedProblemMixin, CommentedDetailView):
         else:
             context['vote'] = None
 
+        # Problem package metadata: prefer package_path, fall back to zipfile name.
+        try:
+            from judge.models import ProblemData
+            try:
+                pdata = ProblemData.objects.get(problem=self.object)
+            except ProblemData.DoesNotExist:
+                pdata = None
+        except Exception:
+            pdata = None
+
+        pkg_name = None
+        pkg_exists = False
+        if pdata is not None:
+            if getattr(pdata, 'package_path', None):
+                pkg_name = os.path.basename(pdata.package_path)
+                pkg_exists = True
+            elif getattr(pdata, 'zipfile', None):
+                try:
+                    pkg_name = os.path.basename(pdata.zipfile.name)
+                    pkg_exists = True
+                except Exception:
+                    pkg_name = None
+
+        context['package_exists'] = pkg_exists
+        context['package_name'] = pkg_name
+        # Public download endpoint for package (view will redirect to external URL if needed)
+        try:
+            context['package_download_url'] = reverse('problem_package_download', args=[self.object.code])
+        except Exception:
+            context['package_download_url'] = None
+
         return context
 
 

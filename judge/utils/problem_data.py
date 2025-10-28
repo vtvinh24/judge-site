@@ -171,6 +171,22 @@ class ProblemDataCompiler(object):
             if len(zippath) != 2:
                 raise ProblemDataError(_('How did you corrupt the zip path?'))
             init['archive'] = zippath[1]
+        elif getattr(self.data, 'package_path', None):
+            pp = self.data.package_path
+            # If package_path looks like a storage-relative path include the
+            # basename similar to how FileField is handled. If it's an external
+            # URL, fall back to basename as a best-effort.
+            try:
+                if pp and (pp.startswith('http://') or pp.startswith('https://')):
+                    init['archive'] = os.path.basename(pp)
+                else:
+                    zippath = split_path_first(pp)
+                    if len(zippath) == 2:
+                        init['archive'] = zippath[1]
+                    else:
+                        init['archive'] = os.path.basename(pp)
+            except Exception:
+                init['archive'] = os.path.basename(pp)
 
         if self.generator:
             generator_path = split_path_first(self.generator.name)

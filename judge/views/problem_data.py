@@ -181,8 +181,31 @@ class ProblemDataView(TitleMixin, ProblemManagerMixin):
                 return []
             elif post and 'problem-data-zipfile' in self.request.FILES:
                 return ZipFile(self.request.FILES['problem-data-zipfile']).namelist()
+            # Prefer package_path when available (it may point to a storage-relative
+            # path or an external URL). If it's an external URL we can't read
+            # entries here, so fall back to zipfile or return empty list.
+            elif getattr(data, 'package_path', None):
+                pp = data.package_path
+                if pp and (pp.startswith('http://') or pp.startswith('https://')):
+                    return []
+                # If package_path already references the problem directory use it
+                # directly; otherwise assume basename lives under the problem code
+                code = data.problem.code
+                prefix1 = code + os.sep
+                prefix2 = code + '/'
+                if pp.startswith(prefix1) or pp.startswith(prefix2):
+                    file_rel = pp
+                else:
+                    file_rel = os.path.join(code, os.path.basename(pp))
+                return ZipFile(problem_data_storage.path(file_rel)).namelist()
             elif data.zipfile:
-                return ZipFile(data.zipfile.path).namelist()
+                # zipfile.path may not be available for all storage backends; try
+                # to use storage path resolution to be defensive.
+                try:
+                    return ZipFile(data.zipfile.path).namelist()
+                except Exception:
+                    file_rel = os.path.join(data.problem.code, os.path.basename(data.zipfile.name))
+                    return ZipFile(problem_data_storage.path(file_rel)).namelist()
         except BadZipfile:
             raise
         return []
@@ -290,16 +313,34 @@ def problem_package_download(request, problem):
     except ProblemData.DoesNotExist:
         raise Http404()
 
-    if not pdata.zipfile:
-        raise Http404()
-
-    # Ensure the zipfile is inside the problem directory to avoid path traversal
-    problem_dir = problem_data_storage.path(obj.code)
-    # Use basename to be defensive
-    file_rel = os.path.join(obj.code, os.path.basename(pdata.zipfile.name))
-    file_abs = problem_data_storage.path(file_rel)
-    if os.path.commonpath((file_abs, problem_dir)) != problem_dir:
-        raise Http404()
+    # Prefer package_path when present. If it's an external URL redirect to it.
+    if getattr(pdata, 'package_path', None):
+        pp = pdata.package_path
+        if pp and (pp.startswith('http://') or pp.startswith('https://')):
+            return HttpResponseRedirect(pp)
+        # Otherwise treat package_path as a storage-relative path. If it already
+        # references the problem directory, use it directly; else assume the
+        # basename lives under the problem code directory.
+        problem_dir = problem_data_storage.path(obj.code)
+        prefix1 = obj.code + os.sep
+        prefix2 = obj.code + '/'
+        if pp.startswith(prefix1) or pp.startswith(prefix2):
+            file_rel = pp
+        else:
+            file_rel = os.path.join(obj.code, os.path.basename(pp))
+        file_abs = problem_data_storage.path(file_rel)
+        if os.path.commonpath((file_abs, problem_dir)) != problem_dir:
+            raise Http404()
+    else:
+        # Fallback to zipfile-based serving for backward compatibility
+        if not pdata.zipfile:
+            raise Http404()
+        problem_dir = problem_data_storage.path(obj.code)
+        # Use basename to be defensive
+        file_rel = os.path.join(obj.code, os.path.basename(pdata.zipfile.name))
+        file_abs = problem_data_storage.path(file_rel)
+        if os.path.commonpath((file_abs, problem_dir)) != problem_dir:
+            raise Http404()
 
     response = HttpResponse()
     try:
@@ -310,6 +351,20 @@ def problem_package_download(request, problem):
 
     # Force download
     response['Content-Type'] = 'application/octet-stream'
-    filename = os.path.basename(pdata.zipfile.name)
+    # Determine a sensible filename for Content-Disposition. Prefer the
+    # resolved storage-relative path (file_rel) if available, else prefer
+    # package_path, then zipfile.name, otherwise fallback.
+    try:
+        if 'file_rel' in locals() and file_rel:
+            filename = os.path.basename(file_rel)
+        elif getattr(pdata, 'package_path', None):
+            filename = os.path.basename(pdata.package_path)
+        elif getattr(pdata, 'zipfile', None):
+            filename = os.path.basename(pdata.zipfile.name)
+        else:
+            filename = 'package.zip'
+    except Exception:
+        filename = 'package.zip'
+
     response['Content-Disposition'] = 'attachment; filename="%s"' % filename
     return response

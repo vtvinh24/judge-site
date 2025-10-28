@@ -28,4 +28,5 @@ class Command(BaseCommand):
             raise CommandError('Unknown problem code: %s' % code)
 
         pdata = create_problem_package(problem, path, package_version=version)
-        self.stdout.write(self.style.SUCCESS('Imported package for %s -> %s' % (code, pdata.zipfile.name)))
+        ref = getattr(pdata, 'package_path', None) or (pdata.zipfile.name if pdata.zipfile else None)
+        self.stdout.write(self.style.SUCCESS('Imported package for %s -> %s' % (code, ref)))

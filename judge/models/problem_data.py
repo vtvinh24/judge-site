@@ -37,6 +37,12 @@ class ProblemData(models.Model):
                                    on_delete=models.CASCADE)
     zipfile = models.FileField(verbose_name=_('data zip file'), storage=problem_data_storage, null=True, blank=True,
                                upload_to=problem_directory_file)
+    # Prefer storing a reference/path to the package instead of relying on a FileField.
+    # This allows referencing packages by path or URL while keeping the existing
+    # `zipfile` FileField for backwards compatibility. Only used for problem
+    # package metadata (not submission package handling).
+    package_path = models.CharField(max_length=500, verbose_name=_('package path'), null=True, blank=True,
+                                    help_text=_('Reference path or URL to the problem package (preferred)'))
     # New package metadata fields to support external JUDGE package flow (backwards-compatible)
     package_id = models.CharField(max_length=64, verbose_name=_('package id'), null=True, blank=True,
                                   help_text=_('External JUDGE package identifier'))
@@ -84,6 +90,16 @@ class ProblemData(models.Model):
                     self.package_uploaded_at = timezone.now()
                 except Exception:
                     self.package_uploaded_at = None
+                # Prefer storing a path reference when possible. If package_path
+                # wasn't explicitly set, set it to the storage name of the
+                # uploaded zipfile (this is typically the problem directory path
+                # joined with the file basename).
+                try:
+                    if not self.package_path:
+                        # FileField stores the relative name in .name
+                        self.package_path = getattr(self.zipfile, 'name', None)
+                except Exception:
+                    pass
 
         saved = super(ProblemData, self).save(*args, **kwargs)
         # Update the original pointer so subsequent saves behave correctly.
@@ -101,6 +117,18 @@ class ProblemData(models.Model):
                 raise
         if self.zipfile:
             self.zipfile.name = _problem_directory_file(new, self.zipfile.name)
+        # If package_path references the problem directory (e.g. "<code>/file"),
+        # update it to the new code directory. If it's an external URL or an
+        # unrelated path, leave it untouched.
+        if self.package_path:
+            try:
+                # Normalize prefix match using os.sep but also accept '/'.
+                prefix1 = original + os.sep
+                prefix2 = original + '/'
+                if self.package_path.startswith(prefix1) or self.package_path.startswith(prefix2):
+                    self.package_path = _problem_directory_file(new, os.path.basename(self.package_path))
+            except Exception:
+                pass
         if self.generator:
             self.generator.name = _problem_directory_file(new, self.generator.name)
         self.save()

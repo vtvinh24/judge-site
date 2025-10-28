@@ -218,7 +218,22 @@
 <div><a href="{{ url('admin:judge_problem_change', problem.id) }}">{{ _('Edit problem') }}</a></div>
 {% if not problem.is_manually_managed %}
 <div><a href="{{ url('problem_data', problem.code) }}">{{ _('Edit test data') }}</a></div>
-{% endif %} {% elif request.user.is_authenticated and has_tickets %}
+{% endif %} {% elif request.user.is_authenticated and has_tickets %} {% if package_exists %}
+<hr />
+<div class="problem-info-entry">
+  <i class="fa fa-download fa-fw"></i><span class="pi-name">{{ _('Problem package:') }}</span>
+  <span class="pi-value">
+    {% if package_download_url %}
+    <a href="{{ package_download_url }}">{{ package_name }}</a>
+    <a
+      class="button"
+      href="{{ package_download_url }}"
+      >{{ _('Download') }}</a
+    >
+    {% else %} {{ package_name }} {% endif %}
+  </span>
+</div>
+{% endif %}
 <hr />
 <div>
   <a href="{{ url('problem_ticket_list', problem.code) }}">{{ _('My tickets') }} {% if num_open_tickets %}<span class="badge">{{ num_open_tickets }}</span>{% endif %} </a>
