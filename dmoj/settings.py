@@ -528,11 +528,16 @@ BRIDGED_DJANGO_ADDRESS = [('localhost', 9998)]
 BRIDGED_DJANGO_CONNECT = None
 
 # Event Server configuration
-EVENT_DAEMON_USE = False
+# Allow enabling the event daemon through environment in case local_settings or env wants to turn it on.
+# Note: the AMQP backend is selected when `EVENT_DAEMON_AMQP` is present in settings (see `judge/event_poster.py`).
+EVENT_DAEMON_USE = os.environ.get('EVENT_DAEMON_USE', 'False') == 'True'
+# Websocket-based defaults (kept for backwards compatibility when EVENT_DAEMON_AMQP is not provided)
 EVENT_DAEMON_POST = 'ws://localhost:9997/'
 EVENT_DAEMON_GET = 'ws://localhost:9996/'
 EVENT_DAEMON_POLL = '/channels/'
 EVENT_DAEMON_KEY = None
+# Exchange name for AMQP-based event daemon. Do not set EVENT_DAEMON_AMQP here — prefer setting it in local_settings or via env
+# so that code can detect presence of AMQP configuration (judge/event_poster.py checks for the attribute).
 EVENT_DAEMON_AMQP_EXCHANGE = 'dmoj-events'
 EVENT_DAEMON_SUBMISSION_KEY = '6Sdmkx^%pk@GsifDfXcwX*Y7LRF%RGT8vmFpSxFBT$fwS7trc8raWfN#CSfQuKApx&$B#Gh2L7p%W!Ww'
 
