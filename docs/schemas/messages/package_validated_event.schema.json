@@ -3,6 +3,7 @@
   "$id": "https://github.com/FHCS-Team/judge/schemas/package_validated_event.schema.json",
   "title": "Problem Package Validated Payload",
   "description": "Payload schema for `dmoj.problem.package.validated` events (JUDGE → DMOJ).",
+  "x-channel": "judge.package.validated",
   "type": "object",
   "additionalProperties": false,
   "properties": {

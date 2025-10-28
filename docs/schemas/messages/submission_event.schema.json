@@ -3,6 +3,7 @@
   "$id": "https://github.com/FHCS-Team/judge/schemas/submission_event.schema.json",
   "title": "Submission Submission Payload",
   "description": "Payload for `dmoj.submission.submitted` events (DMOJ → JUDGE).",
+  "x-channel": "judge.submission.created",
   "type": "object",
   "additionalProperties": false,
   "properties": {

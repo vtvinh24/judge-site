@@ -3,6 +3,7 @@
   "$id": "https://github.com/FHCS-Team/judge/schemas/messages/hooks_execute_request.schema.json",
   "title": "Hook Execute Request Payload",
   "description": "Payload for `dmoj.hooks.execute.request` events for requesting execution of external/managed hooks.",
+  "x-channel": "judge.hooks.execute_request",
   "type": "object",
   "additionalProperties": false,
   "properties": {

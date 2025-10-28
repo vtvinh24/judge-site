@@ -3,6 +3,7 @@
   "$id": "https://github.com/FHCS-Team/judge/schemas/evaluation_progress.schema.json",
   "title": "Evaluation Progress Payload",
   "description": "Optional incremental updates for long-running evaluations (`judge.evaluation.progress`).",
+  "x-channel": "judge.evaluation.progress",
   "type": "object",
   "additionalProperties": false,
   "properties": {

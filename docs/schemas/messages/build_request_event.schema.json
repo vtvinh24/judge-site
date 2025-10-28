@@ -3,6 +3,7 @@
   "$id": "https://github.com/FHCS-Team/judge/schemas/build_request_event.schema.json",
   "title": "Problem Image Build Request Payload",
   "description": "Payload for `dmoj.problem.image.build.request` events — request JUDGE to build images for a problem/package.",
+  "x-channel": "judge.build.request",
   "type": "object",
   "additionalProperties": false,
   "properties": {

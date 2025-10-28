@@ -3,6 +3,7 @@
   "$id": "https://github.com/FHCS-Team/judge/schemas/messages/evaluation_started_event.schema.json",
   "title": "Evaluation Started Payload",
   "description": "Payload for `judge.evaluation.started` events (JUDGE → DMOJ) documenting that an evaluation has begun.",
+  "x-channel": "judge.evaluation.started",
   "type": "object",
   "additionalProperties": false,
   "properties": {

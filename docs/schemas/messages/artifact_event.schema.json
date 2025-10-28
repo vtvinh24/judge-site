@@ -3,6 +3,7 @@
   "$id": "https://github.com/FHCS-Team/judge/schemas/artifact_event.schema.json",
   "title": "Artifact Uploaded Payload",
   "description": "Payload for `dmoj.artifact.uploaded` events (artifact metadata published by JUDGE).",
+  "x-channel": "judge.artifact.created",
   "type": "object",
   "additionalProperties": false,
   "properties": {

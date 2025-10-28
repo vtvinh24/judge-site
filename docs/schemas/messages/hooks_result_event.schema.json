@@ -3,6 +3,7 @@
   "$id": "https://github.com/FHCS-Team/judge/schemas/messages/hooks_result_event.schema.json",
   "title": "Hook Execution Result Payload",
   "description": "Payload for hook execution results (response to `dmoj.hooks.execute.request`).",
+  "x-channel": "judge.hooks.result",
   "type": "object",
   "additionalProperties": false,
   "properties": {

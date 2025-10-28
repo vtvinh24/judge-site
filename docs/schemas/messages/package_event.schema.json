@@ -3,6 +3,7 @@
   "$id": "https://github.com/FHCS-Team/judge/schemas/package_event.schema.json",
   "title": "Problem Package Submission Payload",
   "description": "Payload schema for `dmoj.problem.package.submitted` events (used inside the standard event envelope).",
+  "x-channel": "judge.package.created",
   "type": "object",
   "additionalProperties": false,
   "properties": {
