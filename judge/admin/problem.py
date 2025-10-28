@@ -17,6 +17,8 @@ from reversion.admin import VersionAdmin
 from judge.models import LanguageLimit, Problem, ProblemClarification, ProblemPointsVote, ProblemTranslation, Profile, \
     Solution, ProblemGroup, ProblemType
 import uuid
+import logging
+from judge.events.publishers import package_event as package_event_publisher
 from judge.models.runtime import Language
 from judge.utils.views import NoBatchDeleteMixin
 from judge.widgets import AdminHeavySelect2MultipleWidget, AdminMartorWidget, AdminSelect2MultipleWidget, \
@@ -436,6 +438,26 @@ class ProblemAdmin(NoBatchDeleteMixin, VersionAdmin):
                 except Exception:
                     pass
                 pdata.save()
+                # Publish package event so other services/consumers can react
+                try:
+                    logger = logging.getLogger('judge.admin.problem')
+                    payload = {
+                        'problem_id': getattr(obj, 'id', None),
+                        'code': getattr(obj, 'code', None),
+                        'name': getattr(obj, 'name', None),
+                        'package_path': getattr(pdata, 'package_path', None),
+                        'package_size': getattr(pdata, 'package_size', None),
+                        'package_uploaded_at': (pdata.package_uploaded_at.isoformat()
+                                                if getattr(pdata, 'package_uploaded_at', None) else None),
+                    }
+                    try:
+                        package_event_publisher.publish(payload)
+                        logger.info('Published package event for problem %s', obj.code)
+                    except Exception:
+                        logger.exception('Failed to publish package event for problem %s', obj.code)
+                except Exception:
+                    # Keep package persistence resilient: don't break main save on publish failures
+                    logging.getLogger('judge.admin.problem').exception('Error while preparing package event for problem %s', getattr(obj, 'code', None))
             except Exception:
                 # Don't let package save failures block the main save operation.
                 pass
