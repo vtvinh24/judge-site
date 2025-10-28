@@ -11,6 +11,8 @@ from django.dispatch import receiver
 from .caching import finished_submission
 from .models import BlogPost, Comment, Contest, ContestProblem, ContestSubmission, EFFECTIVE_MATH_ENGINES, Judge, \
     Language, License, MiscConfig, Organization, Problem, Profile, Submission, WebAuthnCredential
+from judge.events.publishers import publish_submission
+import logging
 
 
 def get_pdf_path(basename: str) -> Optional[str]:
@@ -125,6 +127,39 @@ def submission_delete(sender, instance, **kwargs):
     instance.user.calculate_points()
     instance.problem._updating_stats_only = True
     instance.problem.update_stats()
+
+
+@receiver(post_save, sender=Submission)
+def submission_created(sender, instance, created, **kwargs):
+    """Publish a submission event when a new Submission is created.
+
+    This keeps the publish best-effort: failures are logged but do not
+    interrupt normal flow.
+    """
+    if not created:
+        return
+
+    logger = logging.getLogger('judge.signals.submission')
+    try:
+        payload = {
+            'submission_id': instance.id,
+            'problem_id': getattr(instance.problem, 'id', None),
+            'problem_code': getattr(instance.problem, 'code', None),
+            'user_id': getattr(instance.user, 'id', None),
+            'username': getattr(instance.user.user, 'username', None) if getattr(instance.user, 'user', None) else None,
+            'language': getattr(instance.language, 'name', None) if getattr(instance, 'language', None) else None,
+            'date': instance.date.isoformat() if getattr(instance, 'date', None) else None,
+            'package_path': getattr(instance, 'package_file', None).name if getattr(instance, 'package_file', None) else None,
+            'package_size': getattr(instance, 'package_size', None),
+            'package_uploaded_at': instance.package_uploaded_at.isoformat() if getattr(instance, 'package_uploaded_at', None) else None,
+            'status': getattr(instance, 'status', None),
+            'result': getattr(instance, 'result', None),
+        }
+        # publish_submission may validate against a schema; keep it best-effort
+        publish_submission(payload)
+        logger.info('Published submission created event for submission %s', instance.id)
+    except Exception:
+        logger.exception('Failed to publish submission created event for submission %s', getattr(instance, 'id', None))
 
 
 @receiver(post_delete, sender=ContestSubmission)
