@@ -1,4 +1,5 @@
 import json
+import os
 from collections import namedtuple
 from itertools import groupby
 from operator import attrgetter
@@ -27,7 +28,7 @@ from judge.utils.infinite_paginator import InfinitePaginationMixin
 from judge.utils.lazy import memo_lazy
 from judge.utils.problems import get_result_data, user_completed_ids, user_editable_ids, user_tester_ids
 from judge.utils.raw_sql import join_sql_subquery, use_straight_join
-from judge.utils.views import DiggPaginatorMixin, TitleMixin, generic_message
+from judge.utils.views import DiggPaginatorMixin, TitleMixin, generic_message, add_file_response
 
 
 def submission_related(queryset):
@@ -203,6 +204,38 @@ class SubmissionSourceRaw(SubmissionSource):
     def get(self, request, *args, **kwargs):
         submission = self.get_object()
         return HttpResponse(submission.source.source, content_type='text/plain')
+
+def submission_package_download(request, submission):
+    """Public endpoint to download the submission package file.
+
+    This intentionally does not require authentication (used for testing/external judge
+    integrations). It prefers serving via configured storage (supports X-Accel-Redirect
+    when add_file_response is configured) and falls back to reading the file content.
+    """
+    # Resolve submission object
+    sub = get_object_or_404(Submission, id=int(submission))
+
+    # Ensure a package file exists
+    if not getattr(sub, 'package_file', None):
+        raise Http404()
+
+    # Prepare response and attempt to serve via storage
+    response = HttpResponse()
+    try:
+        add_file_response(request, response, None, sub.package_file.name, file_object=sub.package_file.storage)
+    except IOError:
+        raise Http404()
+
+    response['Content-Type'] = 'application/octet-stream'
+    try:
+        filename = os.path.basename(sub.package_file.name) if sub.package_file.name else f'submission_{sub.id}_package'
+    except Exception:
+        filename = f'submission_{sub.id}_package'
+
+    response['Content-Disposition'] = 'attachment; filename="%s"' % filename
+    return response
+
+    
 
 
 @require_POST
