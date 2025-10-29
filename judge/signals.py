@@ -156,7 +156,9 @@ def submission_created(sender, instance, created, **kwargs):
             'result': getattr(instance, 'result', None),
         }
         # publish_submission may validate against a schema; keep it best-effort
-        publish_submission(payload)
+        # Explicitly use the `judge.submission.created` routing key so downstream
+        # consumers can filter on creation events.
+        publish_submission(payload, channel='judge.submission.created')
         logger.info('Published submission created event for submission %s', instance.id)
     except Exception:
         logger.exception('Failed to publish submission created event for submission %s', getattr(instance, 'id', None))

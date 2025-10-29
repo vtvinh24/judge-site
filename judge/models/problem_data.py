@@ -6,6 +6,10 @@ from django.utils.translation import gettext_lazy as _
 from django.utils import timezone
 
 from judge.utils.problem_data import ProblemDataStorage
+from judge.events.publishers import publish_package
+import logging
+
+logger = logging.getLogger('judge.models.problem_data')
 
 __all__ = ['problem_data_storage', 'problem_directory_file', 'ProblemData', 'ProblemTestCase', 'CHECKERS']
 
@@ -70,6 +74,7 @@ class ProblemData(models.Model):
 
     def save(self, *args, **kwargs):
         # If the zipfile has changed, remove the original and update metadata.
+        zipfile_changed = False
         if self.zipfile != self.__original_zipfile:
             try:
                 if self.__original_zipfile:
@@ -80,6 +85,7 @@ class ProblemData(models.Model):
 
             # Update package metadata where possible. Keep operations defensive to avoid
             # breaking saves when storage backends don't expose size or other attrs.
+                zipfile_changed = True
             if self.zipfile:
                 try:
                     # FileField provides .size when file is available via storage
@@ -104,6 +110,26 @@ class ProblemData(models.Model):
         saved = super(ProblemData, self).save(*args, **kwargs)
         # Update the original pointer so subsequent saves behave correctly.
         self.__original_zipfile = self.zipfile
+        # If a new zipfile was attached, publish a package-created event (best-effort).
+        if zipfile_changed and self.zipfile:
+            try:
+                payload = {
+                    'package_id': getattr(self, 'package_id', None),
+                    'problem_id': getattr(self.problem, 'code', None) if getattr(self, 'problem', None) else None,
+                    'package_url': self.package_path,
+                    'checksum': getattr(self, 'package_checksum', None),
+                    'metadata': {
+                        'package_version': getattr(self, 'package_version', None),
+                        'package_size': getattr(self, 'package_size', None),
+                        'package_uploaded_at': getattr(self, 'package_uploaded_at', None).isoformat()
+                        if getattr(self, 'package_uploaded_at', None) else None,
+                    }
+                }
+                publish_package(payload, channel='judge.problem.created')
+                logger.info('Published judge.problem.created for problem %s', payload.get('problem_id'))
+            except Exception:
+                logger.exception('Failed to publish judge.problem.created for problem %s',
+                                 getattr(self.problem, 'code', None))
         return saved
 
     def has_yml(self):

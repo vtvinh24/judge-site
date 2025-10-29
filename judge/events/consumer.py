@@ -6,6 +6,7 @@ from kombu.exceptions import KombuError
 from jsonschema import ValidationError
 
 from judge.events import schemas as event_schemas
+from judge.events.consumers import result_event as result_consumer
 
 logger = logging.getLogger('judge.events.consumers.consumer')
 
@@ -27,6 +28,17 @@ class EventConsumer:
                 logger.warning('Received event without channel; rejecting')
                 message.reject()
                 return
+            # Short-circuit result events: skip schema validation and dispatch
+            # directly to the result_event handler so judge backends can react
+            # to results in near-real-time.
+            try:
+                if channel and channel.startswith('judge.result'):
+                    handled = result_consumer.handle_event(body, message)
+                    if handled:
+                        # Handler is responsible for ack/reject where needed.
+                        return
+            except Exception:
+                logger.exception('Error dispatching to result_event handler')
             schema = event_schemas.get_schema_for_channel(channel)
             if schema is None:
                 logger.warning('No schema for channel %s; acking and skipping', channel)
