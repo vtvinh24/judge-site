@@ -139,6 +139,14 @@ def submission_created(sender, instance, created, **kwargs):
     if not created:
         return
 
+    # Allow callers to suppress automatic publishing (e.g. views that perform
+    # a two-step save to attach package metadata). Callers may set
+    # `instance._skip_event_publish = True` before the initial save to avoid
+    # duplicate events; they are then expected to publish once after metadata
+    # is present.
+    if getattr(instance, '_skip_event_publish', False):
+        return
+
     logger = logging.getLogger('judge.signals.submission')
     try:
         payload = {

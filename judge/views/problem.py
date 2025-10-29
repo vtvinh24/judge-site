@@ -818,6 +818,11 @@ class ProblemSubmit(LoginRequiredMixin, ProblemMixin, TitleMixin, SingleObjectFo
             try:
                 with transaction.atomic():
                     self.new_submission = Submission(user=request.profile, problem=self.object, language=language)
+                    # When performing a package upload we perform a two-step save: the
+                    # instance is created first so files can be attached. Prevent the
+                    # post_save signal from publishing on the initial create; we will
+                    # publish once after package metadata is present.
+                    self.new_submission._skip_event_publish = True
                     # Do not save yet; save after writing file and metadata
                     self.new_submission.save()
 
@@ -845,6 +850,29 @@ class ProblemSubmit(LoginRequiredMixin, ProblemMixin, TitleMixin, SingleObjectFo
                     self.new_submission.package_uploaded_at = timezone.now()
                     self.new_submission.package_id = uuid.uuid4().hex
                     self.new_submission.save()
+
+                    # Publish a submission.created event now that package metadata is
+                    # attached. This avoids publishing twice (the post_save signal was
+                    # skipped for the initial create).
+                    try:
+                        from judge.events.publishers import publish_submission
+                        payload = {
+                            'submission_id': self.new_submission.id,
+                            'problem_id': getattr(self.new_submission.problem, 'id', None),
+                            'problem_code': getattr(self.new_submission.problem, 'code', None),
+                            'user_id': getattr(self.new_submission.user, 'id', None),
+                            'username': getattr(self.new_submission.user.user, 'username', None) if getattr(self.new_submission.user, 'user', None) else None,
+                            'language': getattr(self.new_submission.language, 'name', None) if getattr(self.new_submission, 'language', None) else None,
+                            'date': self.new_submission.date.isoformat() if getattr(self.new_submission, 'date', None) else None,
+                            'package_path': getattr(self.new_submission, 'package_file', None).name if getattr(self.new_submission, 'package_file', None) else None,
+                            'package_size': getattr(self.new_submission, 'package_size', None),
+                            'package_uploaded_at': self.new_submission.package_uploaded_at.isoformat() if getattr(self.new_submission, 'package_uploaded_at', None) else None,
+                            'status': getattr(self.new_submission, 'status', None),
+                            'result': getattr(self.new_submission, 'result', None),
+                        }
+                        publish_submission(payload, channel='judge.submission.created')
+                    except Exception:
+                        logging.getLogger('judge.views.problem').exception('Failed to publish submission created event for submission %s', getattr(self.new_submission, 'id', None))
 
                     # Create an empty/placeholder SubmissionSource so judge-related plumbing doesn't break
                     source = SubmissionSource(submission=self.new_submission, source='')
