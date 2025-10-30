@@ -114,20 +114,47 @@ def handle_result_event(envelope: dict, message=None):
         
         # Normalize rubrics to ensure they have the expected structure
         normalized_rubrics = []
-        for rubric in rubrics:
-            if isinstance(rubric, dict):
-                normalized_rubric = {
-                    'rubric_id': rubric.get('rubric_id', rubric.get('id', '')),
-                    'rubric_name': rubric.get('rubric_name', rubric.get('name', '')),
-                    'score': rubric.get('score'),
-                    'max_score': rubric.get('max_score'),
-                    'description': rubric.get('description'),
-                }
-                # Remove None values to keep JSON clean
-                normalized_rubric = {k: v for k, v in normalized_rubric.items() if v is not None}
-                normalized_rubrics.append(normalized_rubric)
-            else:
-                logger.warning('Skipping invalid rubric entry: %s', rubric)
+        raw_list = []
+        # Allow rubrics to be either a list or a dict mapping id -> value
+        if isinstance(rubrics, dict):
+            for k, v in rubrics.items():
+                if isinstance(v, dict):
+                    entry = dict(v)
+                    entry.setdefault('rubric_id', k)
+                    raw_list.append(entry)
+                else:
+                    raw_list.append({'rubric_id': k, 'value': v})
+        elif isinstance(rubrics, list):
+            raw_list = rubrics
+        else:
+            # Coerce primitive into single-entry list
+            raw_list = [rubrics]
+
+        for idx, item in enumerate(raw_list):
+            if not isinstance(item, dict):
+                # Coerce primitive entries into dicts.
+                item = {'rubric_id': str(idx), 'value': item}
+
+            rid = item.get('rubric_id') or item.get('id') or item.get('name') or str(idx)
+            rname = item.get('rubric_name') or item.get('name') or rid
+            score = item.get('score')
+            if score is None:
+                score = item.get('value')
+            max_score = item.get('max_score') or item.get('max')
+            description = item.get('description')
+
+            normalized_rubric = {
+                'rubric_id': rid,
+                'rubric_name': rname,
+                'score': score,
+                'max_score': max_score,
+            }
+            if description is not None:
+                normalized_rubric['description'] = description
+
+            # Remove None values
+            normalized_rubric = {k: v for k, v in normalized_rubric.items() if v is not None}
+            normalized_rubrics.append(normalized_rubric)
         
         # Use database transaction to ensure atomicity
         with transaction.atomic():
@@ -189,7 +216,8 @@ def handle_result_event(envelope: dict, message=None):
         raise
 
 
-# Register this handler for the judge.result.created routing key
+# Register this handler for common result routing keys
 register_handler('judge.result.created', handle_result_event)
+register_handler('judge.result.evaluation', handle_result_event)
 
-logger.info('Registered result event handler for routing key: judge.result.created')
+logger.info('Registered result event handler for routing keys: judge.result.created, judge.result.evaluation')
