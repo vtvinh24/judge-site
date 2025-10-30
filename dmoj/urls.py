@@ -155,6 +155,7 @@ urlpatterns = [
         path('', submission.SubmissionStatus.as_view(), name='submission_status'),
         path('/abort', submission.abort_submission, name='submission_abort'),
         path('/package', submission.submission_package_download, name='submission_package_download'),
+        path('/artifact/<path:artifact>', submission.submission_artifact_download, name='submission_artifact_download'),
     ])),
 
     path('users/', include([

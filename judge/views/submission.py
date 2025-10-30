@@ -22,7 +22,7 @@ from django.views.generic import DetailView, ListView
 
 from judge.events import poster as event
 from judge.highlight_code import highlight_code
-from judge.models import Contest, Language, Problem, ProblemTranslation, Profile, Submission
+from judge.models import Contest, Language, Problem, ProblemTranslation, Profile, Submission, ResultEvent
 from judge.models.problem import SubmissionSourceAccess
 from judge.utils.infinite_paginator import InfinitePaginationMixin
 from judge.utils.lazy import memo_lazy
@@ -187,6 +187,69 @@ class SubmissionStatus(SubmissionDetailBase):
             pass
         else:
             context['time_limit'] = lang_limit.time_limit
+
+        # Load and normalize rubric data from the most recent ResultEvent for this submission (if any).
+        # ResultEvent.rubrics may be stored either as a list (array) or a dict mapping ids -> data.
+        try:
+            events = ResultEvent.objects.filter(submission_id=str(submission.id)).order_by('-created_at')
+            if not events:
+                context['rubrics'] = []
+                context['evaluation_total_score'] = None
+                context['evaluation_max_score'] = None
+                context['evaluation_percentage'] = None
+            else:
+                payload = events[0].rubrics or {}
+                raw_list = []
+
+                # Normalize payload into a list of entries where each entry is a dict.
+                if isinstance(payload, list):
+                    raw_list = payload
+                elif isinstance(payload, dict):
+                    for k, v in payload.items():
+                        if isinstance(v, dict):
+                            entry = dict(v)
+                            entry.setdefault('rubric_id', k)
+                            raw_list.append(entry)
+                        else:
+                            raw_list.append({'rubric_id': k, 'value': v})
+
+                rubrics = []
+                for idx, item in enumerate(raw_list):
+                    if not isinstance(item, dict):
+                        # Coerce primitive entries into dicts.
+                        item = {'rubric_id': str(idx), 'value': item}
+
+                    rid = item.get('rubric_id') or item.get('id') or item.get('name') or str(idx)
+                    rname = item.get('rubric_name') or item.get('name') or rid
+                    score = item.get('score')
+                    if score is None:
+                        score = item.get('value')
+                    max_score = item.get('max_score') or item.get('max') or events[0].max_score
+                    output_file = item.get('output_file') or item.get('artifact') or None
+                    output = item.get('output')
+                    description = item.get('description')
+
+                    rubrics.append({
+                        'rubric_id': rid,
+                        'rubric_name': rname,
+                        'score': score,
+                        'max_score': max_score,
+                        'output_file': output_file,
+                        'output': output,
+                        'description': description,
+                    })
+
+                context['rubrics'] = rubrics
+                # Expose latest ResultEvent score summary to the template when available.
+                context['evaluation_total_score'] = getattr(events[0], 'total_score', None)
+                context['evaluation_max_score'] = getattr(events[0], 'max_score', None)
+                context['evaluation_percentage'] = getattr(events[0], 'percentage', None)
+        except Exception:
+            # Don't let rubric extraction fail the page render.
+            context['rubrics'] = []
+            context['evaluation_total_score'] = None
+            context['evaluation_max_score'] = None
+            context['evaluation_percentage'] = None
         return context
 
 
@@ -246,6 +309,75 @@ def abort_submission(request, submission):
         raise PermissionDenied()
     submission.abort()
     return HttpResponseRedirect(reverse('submission_status', args=(submission.id,)))
+
+
+def submission_artifact_download(request, submission, artifact):
+    """Serve an artifact produced for a submission.
+
+    This looks up the latest ResultEvent for the submission and attempts to
+    resolve an artifact path from the `artifacts` JSON. Only files inside
+    allowed roots are served to avoid arbitrary file reads.
+    """
+    submission_obj = get_object_or_404(Submission, id=int(submission))
+
+    # Find latest event
+    events = ResultEvent.objects.filter(submission_id=str(submission_obj.id)).order_by('-created_at')
+    if not events:
+        raise Http404()
+
+    artifacts = events[0].artifacts or {}
+
+    # Possible shapes: dict name->path or dict name->{'path': ...} or list of entries
+    file_path = None
+    if isinstance(artifacts, dict):
+        # Direct mapping
+        candidate = artifacts.get(artifact)
+        if isinstance(candidate, str):
+            file_path = candidate
+        elif isinstance(candidate, dict):
+            file_path = candidate.get('path') or candidate.get('file')
+        else:
+            # Try to match by basename
+            for v in artifacts.values():
+                p = v if isinstance(v, str) else (v.get('path') if isinstance(v, dict) else None)
+                if p and os.path.basename(p) == artifact:
+                    file_path = p
+                    break
+    elif isinstance(artifacts, list):
+        for entry in artifacts:
+            if isinstance(entry, dict):
+                name = entry.get('name') or entry.get('rubric_id') or os.path.basename(entry.get('path', ''))
+                if name == artifact or os.path.basename(entry.get('path', '')) == artifact:
+                    file_path = entry.get('path') or entry.get('file')
+                    break
+
+    if not file_path:
+        raise Http404()
+
+    # Normalize path and security check: only allow serving from known roots
+    file_path = os.path.realpath(file_path)
+    allowed_roots = [os.path.realpath(settings.BASE_DIR)]
+    if getattr(settings, 'DMOJ_PROBLEM_DATA_ROOT', None):
+        allowed_roots.append(os.path.realpath(settings.DMOJ_PROBLEM_DATA_ROOT))
+    if getattr(settings, 'MEDIA_ROOT', None):
+        allowed_roots.append(os.path.realpath(settings.MEDIA_ROOT))
+
+    if not any(file_path.startswith(root + os.sep) or file_path == root for root in allowed_roots):
+        # Don't serve files outside allowed roots
+        raise Http404()
+
+    if not os.path.exists(file_path) or not os.path.isfile(file_path):
+        raise Http404()
+
+    response = HttpResponse()
+    try:
+        add_file_response(request, response, None, file_path)
+    except IOError:
+        raise Http404()
+
+    response['Content-Type'] = 'application/octet-stream'
+    response['Content-Disposition'] = 'attachment; filename="%s"' % os.path.basename(file_path)
+    return response
 
 
 def filter_submissions_by_visible_problems(queryset, user):
